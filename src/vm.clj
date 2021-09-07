@@ -1,5 +1,8 @@
 (ns vm
-  (:require [clojure.java.io :as io])
+  (:require
+   [clojure.data :as data]
+   [clojure.java.io :as io]
+   [clojure.string :as str])
   (:import java.lang.Byte))
 
 (defn halt-op [vm]
@@ -101,10 +104,28 @@
   (flush)
   (update vm :head + 2))
 
+(def input (atom (str/split-lines (slurp "input"))))
+
+(defn read-line* []
+  (if-let [line (first @input)]
+    (do
+     (println line)
+     (swap! input rest)
+     line)
+    (read-line)))
+
+(defn queue-input [vm]
+  (let [line (read-line*)]
+    (if (= \# (get line 0))
+      (recur ((eval (read-string line)) vm))
+      (assoc vm :input (map int (str line "\n"))))))
+
 (defn in-op [vm a]
-  (-> vm
-      (update :registers assoc a (.read *in*))
-      (update :head + 2)))
+  (let [vm (if (seq (:input vm)) vm (queue-input vm))]
+    (-> vm
+        (update :registers assoc a (first (:input vm)))
+        (update :input rest)
+        (update :head + 2))))
 
 (defn noop-op [vm]
   (update vm :head + 1))
