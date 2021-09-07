@@ -52,5 +52,19 @@ take teleporter
 use teleporter
 take business card
 take strange book
-#(update % :registers assoc 7 1)
+#(update % :registers assoc 7 25734)
+#(update % :memory assoc 5489 6 5490 5498)
 use teleporter
+go north
+go north
+go north
+go north
+go north
+go north
+go north
+go east
+take journal
+go west
+go north
+go north
+take orb
