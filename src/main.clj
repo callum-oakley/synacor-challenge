@@ -2,7 +2,9 @@
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str])
-  (:import java.lang.Byte))
+  (:import
+   clojure.lang.PersistentQueue
+   java.lang.Byte))
 
 (defn halt-op [vm]
   (assoc vm :halted true))
@@ -130,29 +132,16 @@
   (update vm :head + 1))
 
 (defn do-op [vm [op & args]]
-  (let [vm* (apply op vm (map-indexed (fn [i arg] (arg vm (inc i))) args))]
-    (when (:debug vm)
-      (println)
-      (Thread/sleep 5))
-    vm*))
+  (apply op vm (map-indexed (fn [i arg] (arg vm (inc i))) args)))
 
 (defn rarg [vm offset]
-  (when (:debug vm)
-    (print (str "\tr" (- ((:memory vm) (+ offset (:head vm))) 32768))))
   (- ((:memory vm) (+ offset (:head vm))) 32768))
 
 (defn varg [vm offset]
   (let [literal ((:memory vm) (+ offset (:head vm)))]
     (if (< literal 32768)
-      (do
-        (when (:debug vm)
-          (print (str "\t" literal)))
-        literal)
-      (do
-        (when (:debug vm)
-          (print (str "\tr" (- literal 32768)
-                      "(" ((:registers vm) (- literal 32768)) ")")))
-        ((:registers vm) (- literal 32768))))))
+      literal
+      ((:registers vm) (- literal 32768)))))
 
 (def debug-op-names
   {0  "halt" 1  "set"  2  "push" 3  "pop"
@@ -170,50 +159,67 @@
    16 2      17 1      18 0      19 1
    20 1      21 0})
 
-(defn run [vm]
-  (when (:debug vm)
-    (print (str "[" (str/join "\t" (:registers vm)) "]" "\t"
-                (:head vm) "\t"
-                (debug-op-names ((:memory vm) (:head vm))))))
-  (if (:halted vm)
-    vm
-    (recur (do-op vm (case ((:memory vm) (:head vm))
-                       0  [halt-op]                 1 [set-op  rarg varg]
-                       2  [push-op varg]            3 [pop-op  rarg]
-                       4  [eq-op   rarg varg varg]  5 [gt-op   rarg varg varg]
-                       6  [jmp-op  varg]            7 [jt-op   varg varg]
-                       8  [jf-op   varg varg]       9 [add-op  rarg varg varg]
-                       10 [mult-op rarg varg varg] 11 [mod-op  rarg varg varg]
-                       12 [and-op  rarg varg varg] 13 [or-op   rarg varg varg]
-                       14 [not-op  rarg varg]      15 [rmem-op rarg varg]
-                       16 [wmem-op varg varg]      17 [call-op varg]
-                       18 [ret-op]                 19 [out-op  varg]
-                       20 [in-op   rarg]           21 [noop-op])))))
-
-(defn darg [literal]
+(defn debug-arg [literal]
   (if (< literal 32768)
     literal
     (str "r" (- literal 32768))))
 
-(defn decompile [memory]
-  (loop [head 0]
-    (if-let [op (debug-op-names (memory head))]
-      (let [args (debug-op-args (memory head))
-            head* (+ head args 1)]
-        (println (str/join "\t" (into [head op]
-                                      (map #(darg (memory (+ head 1 %)))
-                                           (range args)))))
-        (when (< head* (count memory))
-          (recur head*)))
-      (do
-        (println head "\tdata\t" (memory head))
-        (when (< (inc head) (count memory))
-          (recur (inc head)))))))
+(defn debug-op [{:keys [memory head]}]
+  (println (str/join "\t" (into [head (debug-op-names (memory head))]
+                                (map #(debug-arg (memory (+ head 1 %)))
+                                     (range (debug-op-args (memory head))))))))
+
+(defn init-memory []
+  (->> (io/input-stream "challenge.bin")
+       .readAllBytes
+       (map #(Byte/toUnsignedInt %))
+       (partition 2)
+       (reduce (fn [[m i] [low high]]
+                 [(assoc m i (+ (bit-shift-left high 8) low))
+                  (inc i)])
+               [(vec (replicate 32768 0))
+                0])
+       first))
+
+(defn main [_]
+  (loop [vm {:memory (init-memory)
+             :registers [0 0 0 0 0 0 0 0]
+             :stack []
+             :head 0}]
+    (when (:debug vm)
+      (debug-op vm))
+    (when-not (:halted vm)
+      (recur (do-op vm (case ((:memory vm) (:head vm))
+                         0  [halt-op]                 1 [set-op  rarg varg]
+                         2  [push-op varg]            3 [pop-op  rarg]
+                         4  [eq-op   rarg varg varg]  5 [gt-op   rarg varg varg]
+                         6  [jmp-op  varg]            7 [jt-op   varg varg]
+                         8  [jf-op   varg varg]       9 [add-op  rarg varg varg]
+                         10 [mult-op rarg varg varg] 11 [mod-op  rarg varg varg]
+                         12 [and-op  rarg varg varg] 13 [or-op   rarg varg varg]
+                         14 [not-op  rarg varg]      15 [rmem-op rarg varg]
+                         16 [wmem-op varg varg]      17 [call-op varg]
+                         18 [ret-op]                 19 [out-op  varg]
+                         20 [in-op   rarg]           21 [noop-op]))))))
+
+;; Results in "listing"
+(defn decompile [_]
+  (loop [vm {:memory (init-memory)
+             :head 0}]
+    (if-let [args (debug-op-args ((:memory vm) (:head vm)))]
+      (let [head* (+ (:head vm) args 1)]
+        (debug-op vm)
+        (when (< head* (count (:memory vm)))
+          (recur (assoc vm :head head*))))
+      (let [head* (inc (:head vm))]
+        (println (:head vm) "\tdata\t" ((:memory vm) (:head vm)))
+        (when (< head* (count (:memory vm)))
+          (recur (assoc vm :head head*)))))))
 
 ;; 25734
 ;; It's the Ackermann function!
 ;; TODO this is still fairly slow. Can we make it faster?
-(defn fast-check []
+(defn fast-teleporter-check [_]
   (loop [r7 0]
     (def f6027
       (memoize
@@ -228,18 +234,39 @@
       (when (not= 6 res)
         (recur (inc r7))))))
 
-(defn main [_]
-  (run
-   {:memory (->> (io/input-stream "challenge.bin")
-                 .readAllBytes
-                 (map #(Byte/toUnsignedInt %))
-                 (partition 2)
-                 (reduce (fn [[m i] [low high]]
-                           [(assoc m i (+ (bit-shift-left high 8) low))
-                            (inc i)])
-                         [(vec (replicate 32768 0))
-                          0])
-                 first)
-    :registers [0 0 0 0 0 0 0 0]
-    :stack []
-    :head 0}))
+(defn breadth-first-search [start adjacent goal?]
+  (loop [queue (conj PersistentQueue/EMPTY start)]
+    (if (goal? (peek queue))
+      (peek queue)
+      (recur (into (pop queue) (adjacent (peek queue)))))))
+
+(def floor
+  {[0 3] *  [1 3] 8  [2 3] -  [3 3] 1
+   [0 2] 4  [1 2] *  [2 2] 11 [3 2] *
+   [0 1] +  [1 1] 4  [2 1] -  [3 1] 18
+            [1 0] -  [2 0] 9  [3 0] *})
+
+;; [:n :e :e :n :w :s :e :e :w :n :n :e]
+(defn orb-puzzle-shortest-path [_]
+  (println
+   (:path
+    (breadth-first-search
+     {:pos [0 0]
+      :path []
+      :orb 22}
+     (fn [state]
+       (when (not= [3 3] (:pos state))
+         (->> [:n :e :s :w]
+              (map #(-> state
+                        (update :path conj %)
+                        (update :pos (fn [[x y]]
+                                       (case %
+                                         :n [x (inc y)] :e [(inc x) y]
+                                         :s [x (dec y)] :w [(dec x) y])))))
+              (keep #(when-let [sym (floor (:pos %))]
+                       (if (number? sym)
+                         (update % :orb (:op %) sym)
+                         (assoc % :op sym))))
+              (remove #(neg? (:orb %))))))
+     (fn [state]
+       (and (= [3 3] (:pos state)) (= 30 (:orb state))))))))

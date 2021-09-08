@@ -52,6 +52,14 @@ The floor plan is
 with the start at 22, and the vault at 1. We need the orb to weigh 30 when we
 reach the vault.
 
+A breadth first search gives us the shortest path as
+
+    [:n :e :e :n :w :s :e :e :w :n :n :e]
+
+This time the mirror gives us `VilUTpOpHOXV`
+
+    VilUTpOpHOXV | VXOHqOqTUliV
+
 ## Codes
 
 - `SpKPqHYzYxUp` given in the hints in arch-spec
@@ -61,3 +69,4 @@ reach the vault.
 - `QvZJEumZbLqY` chiseled on the wall in the Twisty passages
 - `EfGriRahcFsv` written in the stars when teleporting
 - `nWMQDVBYuKdT` found after hacking the teleporter
+- `VXOHqOqTUliV` reflected in the mirror after the orb challenge
